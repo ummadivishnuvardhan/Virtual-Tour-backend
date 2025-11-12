@@ -1,55 +1,72 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
 import { v2 as cloudinary } from "cloudinary";
 import cors from "cors";
-import dotenv from "dotenv";
+
 import connectDB from "./config/Database.js";
 import Image from "./models/image.js";
+import Submission from "./models/Submission.js";
 import DepartmentRoutes from "./routes/department.js";
 import AuthRoutes from "./routes/auth.js";
-
-dotenv.config();
+import clerkAuth from "./middlewares/clerkAuth.js";
+import isAdmin from "./middlewares/isAdmin.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.use("/api/auth", AuthRoutes);
-// Use Department routes
-app.use("/api/departments", DepartmentRoutes);
 
+// Verify environment variables on startup
+console.log("🔍 Checking environment variables...");
+console.log("✓ CLERK_SECRET_KEY:", process.env.CLERK_SECRET_KEY ? "Found" : "❌ MISSING");
+console.log("✓ CLOUDINARY_CLOUD_NAME:", process.env.CLOUDINARY_CLOUD_NAME ? "Found" : "❌ MISSING");
 
 // Connect to MongoDB
 connectDB();
 
+// CORS configuration - Allow your frontend
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  credentials: true
+}));
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
 
 // Cloudinary configuration
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "dl5nvw6pa",
-  api_key: process.env.CLOUDINARY_API_KEY || "927697336393333",
-  api_secret: process.env.CLOUDINARY_API_SECRET || "icCm5jFcPR-0YsUVkaEYVByRElY"
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Multer storage configuration
-const storage = new CloudinaryStorage({
+// Multer storage for USER submissions (goes to submissions folder)
+const submissionStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "cse-vr-panorama-submissions",
+    format: async (req, file) => "jpeg",
+    public_id: (req, file) => 'submission-' + Date.now() + '-' + file.originalname,
+  },
+});
+
+// Multer storage for ADMIN direct uploads (goes to main folder)
+const adminStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: "cse-vr-panorama",
     format: async (req, file) => "jpeg",
-    public_id: (req, file) => file.originalname + '-' + Date.now(),
+    public_id: (req, file) => 'admin-' + Date.now() + '-' + file.originalname,
   },
 });
 
-const upload = multer({ 
-  storage: storage,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
-  },
+const submissionUpload = multer({ 
+  storage: submissionStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    // Check file type
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
@@ -58,74 +75,258 @@ const upload = multer({
   }
 });
 
-// MONITORING ROUTES
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-app.get('/api/stats', async (req, res) => {
-  try {
-    const totalRooms = await Image.countDocuments({ isActive: true });
-    const totalInactiveRooms = await Image.countDocuments({ isActive: false });
-    const totalViews = await Image.aggregate([
-      { $match: { isActive: true } },
-      { $group: { _id: null, totalViews: { $sum: "$views" } } }
-    ]);
-    
-    const recentUploads = await Image.find({ isActive: true })
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .select('roomName createdAt views');
-    
-    const popularRooms = await Image.find({ isActive: true })
-      .sort({ views: -1 })
-      .limit(5)
-      .select('roomName views createdAt');
-    
-    res.json({
-      success: true,
-      data: {
-        totalRooms,
-        totalInactiveRooms,
-        totalViews: totalViews.length > 0 ? totalViews[0].totalViews : 0,
-        recentUploads,
-        popularRooms,
-        serverUptime: process.uptime(),
-        timestamp: new Date().toISOString()
-      }
-    });
-  } catch (error) {
-    console.error("Stats error:", error);
-    res.status(500).json({ success: false, error: 'Failed to fetch stats' });
+const adminUpload = multer({ 
+  storage: adminStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'), false);
+    }
   }
 });
 
-// MAIN ROUTES
+// ============================================
+// ROUTES
+// ============================================
+
+// Health check
 app.get('/', (req, res) => {
   res.json({ 
     message: "CSE VR Panorama API is running!",
-    version: "1.1.0",
-    endpoints: {
-      health: '/api/health',
-      stats: '/api/stats',
-      rooms: {
-        getAll: 'GET /api/rooms',
-        getById: 'GET /api/rooms/:id',
-        create: 'POST /api/upload',
-        update: 'PUT /api/rooms/:id',
-        delete: 'DELETE /api/rooms/:id',
-        bulkDelete: 'DELETE /api/rooms/bulk',
-        search: 'GET /api/rooms/search?q=searchTerm'
-      }
-    }
+    version: "1.4.0",
+    timestamp: new Date().toISOString(),
+    clerkConfigured: !!process.env.CLERK_SECRET_KEY
   });
 });
+
+// Register auth and department routes
+app.use("/api/auth", AuthRoutes);
+app.use("/api/departments", DepartmentRoutes);
+
+// ============================================
+// USER SUBMISSION ROUTES (PUBLIC - NO AUTH)
+// ============================================
+
+// PUBLIC: Submit panorama for review
+app.post("/api/submissions", submissionUpload.single("panoramaImage"), async (req, res) => {
+  try {
+    console.log("📤 User submission received");
+    
+    const { roomName, description, department, uploaderEmail } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "No file uploaded" });
+    }
+    
+    if (!roomName?.trim()) {
+      return res.status(400).json({ success: false, error: "Room name is required" });
+    }
+
+    const sub = await Submission.create({
+      filename: req.file.originalname,
+      url: req.file.path || req.file.secure_url || req.file.url,
+      public_id: req.file.public_id || null,
+      roomName: roomName.trim(),
+      description: (description || "").trim(),
+      department: (department || "").trim(),
+      uploaderEmail: uploaderEmail || null,
+      status: "pending",
+    });
+
+    console.log("✅ Submission created:", sub._id);
+    res.status(201).json({ 
+      success: true, 
+      message: "Submitted for review. Admin will review your submission.", 
+      data: sub 
+    });
+  } catch (e) {
+    console.error("❌ Submission error:", e);
+    res.status(500).json({ success: false, error: "Submission failed" });
+  }
+});
+
+// ============================================
+// ADMIN SUBMISSION MANAGEMENT ROUTES (PROTECTED)
+// ============================================
+
+// ADMIN: Get all pending submissions
+app.get("/api/submissions", clerkAuth, isAdmin, async (req, res) => {
+  try {
+    console.log("📋 Admin fetching pending submissions");
+    console.log("🔐 User:", req.user?.emailAddress);
+    
+    const subs = await Submission.find({ status: "pending" }).sort({ createdAt: -1 });
+    console.log(`✅ Found ${subs.length} pending submissions`);
+    
+    res.json({ success: true, data: subs });
+  } catch (e) {
+    console.error("❌ Fetch submissions error:", e);
+    res.status(500).json({ success: false, error: "Failed to fetch submissions" });
+  }
+});
+
+// ADMIN: Approve submission
+app.post("/api/submissions/:id/approve", clerkAuth, isAdmin, async (req, res) => {
+  try {
+    console.log("✅ Admin approving submission:", req.params.id);
+    
+    const sub = await Submission.findById(req.params.id);
+    if (!sub) {
+      return res.status(404).json({ success: false, error: "Submission not found" });
+    }
+    
+    if (sub.status !== "pending") {
+      return res.status(400).json({ success: false, error: "Submission not pending" });
+    }
+
+    // Check for duplicate
+    const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const dup = await Image.findOne({
+      roomName: { $regex: `^${escape(sub.roomName)}$`, $options: "i" },
+      department: { $regex: `^${escape(sub.department)}$`, $options: "i" },
+      isActive: true
+    });
+    
+    if (dup) {
+      return res.status(400).json({ success: false, error: "Room name already exists in this department" });
+    }
+
+    // Create room
+    const room = await Image.create({
+      filename: sub.filename,
+      url: sub.url,
+      public_id: sub.public_id || null,
+      roomName: sub.roomName,
+      description: sub.description,
+      department: sub.department,
+      isActive: true,
+    });
+
+    // Mark as approved
+    sub.status = "approved";
+    await sub.save();
+
+    console.log("✅ Approved and room created:", room._id);
+    res.json({ success: true, message: "Submission approved successfully", data: room });
+  } catch (e) {
+    console.error("❌ Approve error:", e);
+    res.status(500).json({ success: false, error: "Approval failed" });
+  }
+});
+
+// ADMIN: Reject submission
+app.post("/api/submissions/:id/reject", clerkAuth, isAdmin, async (req, res) => {
+  try {
+    console.log("❌ Admin rejecting submission:", req.params.id);
+    
+    const sub = await Submission.findById(req.params.id);
+    if (!sub) {
+      return res.status(404).json({ success: false, error: "Submission not found" });
+    }
+
+    sub.status = "rejected";
+    await sub.save();
+
+    // Delete from cloudinary
+    if (sub.public_id) {
+      try {
+        await cloudinary.uploader.destroy(sub.public_id);
+        console.log("🗑️ Cloudinary image deleted");
+      } catch (err) {
+        console.error("Cloudinary delete error:", err);
+      }
+    }
+
+    console.log("✅ Submission rejected");
+    res.json({ success: true, message: "Submission rejected successfully" });
+  } catch (e) {
+    console.error("❌ Reject error:", e);
+    res.status(500).json({ success: false, error: "Rejection failed" });
+  }
+});
+
+// ============================================
+// ADMIN DIRECT UPLOAD ROUTE
+// ============================================
+
+// ADMIN: Direct upload (bypasses review)
+app.post("/api/admin/upload", clerkAuth, isAdmin, adminUpload.single("panoramaImage"), async (req, res) => {
+  try {
+    console.log("👑 Admin direct upload received");
+    
+    const { roomName, description, department } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "No file uploaded" });
+    }
+    
+    if (!roomName?.trim()) {
+      return res.status(400).json({ success: false, error: "Room name is required" });
+    }
+    
+    if (!department?.trim()) {
+      return res.status(400).json({ success: false, error: "Department is required" });
+    }
+
+    // Check for duplicate
+    const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const rn = roomName.trim();
+    const dep = department.trim();
+
+    const existingRoom = await Image.findOne({
+      roomName: { $regex: `^${escape(rn)}$`, $options: "i" },
+      department: { $regex: `^${escape(dep)}$`, $options: "i" },
+      isActive: true
+    });
+
+    if (existingRoom) {
+      if (req.file.public_id) {
+        try {
+          await cloudinary.uploader.destroy(req.file.public_id);
+        } catch (e) {
+          console.error("Cleanup error:", e);
+        }
+      }
+      return res.status(400).json({ success: false, error: "Room name already exists in this department" });
+    }
+
+    // Create room directly
+    const newImage = new Image({
+      filename: req.file.originalname,
+      url: req.file.path,
+      public_id: req.file.public_id || null,
+      roomName: rn,
+      description: description ? description.trim() : "",
+      department: dep,
+      isActive: true
+    });
+
+    await newImage.save();
+
+    console.log("✅ Admin room created directly:", newImage._id);
+    res.status(201).json({
+      success: true,
+      message: "Room uploaded successfully",
+      data: newImage
+    });
+  } catch (error) {
+    console.error("❌ Admin upload error:", error);
+    if (req.file && req.file.public_id) {
+      try {
+        await cloudinary.uploader.destroy(req.file.public_id);
+      } catch (e) {
+        console.error("Cleanup error:", e);
+      }
+    }
+    res.status(500).json({ success: false, error: "Upload failed" });
+  }
+});
+
+// ============================================
+// PUBLIC ROOMS ROUTES
+// ============================================
 
 app.get("/api/rooms", async (req, res) => {
   try {
@@ -134,11 +335,10 @@ app.get("/api/rooms", async (req, res) => {
     const sortBy = req.query.sortBy || "createdAt";
     const sortOrder = req.query.sortOrder === "asc" ? 1 : -1;
     const includeInactive = req.query.includeInactive === "true";
-    const department = req.query.department; // NEW: optional department filter
+    const department = req.query.department;
 
     const skip = (page - 1) * limit;
 
-    // Build filter query
     const filterQuery = includeInactive ? {} : { isActive: true };
     if (department) {
       filterQuery.department = department;
@@ -176,7 +376,6 @@ app.get("/api/rooms", async (req, res) => {
   }
 });
 
-// SEARCH ROOMS
 app.get("/api/rooms/search", async (req, res) => {
   try {
     const { q, page = 1, limit = 10 } = req.query;
@@ -222,7 +421,6 @@ app.get("/api/rooms/search", async (req, res) => {
   }
 });
 
-// GET SPECIFIC ROOM - Enhanced with view tracking
 app.get("/api/rooms/:id", async (req, res) => {
   try {
     const room = await Image.findById(req.params.id);
@@ -231,7 +429,6 @@ app.get("/api/rooms/:id", async (req, res) => {
       return res.status(404).json({ success: false, error: "Room not found" });
     }
     
-    // Increment view count
     await Image.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
     room.views += 1;
     
@@ -242,131 +439,35 @@ app.get("/api/rooms/:id", async (req, res) => {
   }
 });
 
-app.post("/api/upload", upload.single("panoramaImage"), async (req, res) => {
+// ============================================
+// ADMIN ROOM MANAGEMENT ROUTES (PROTECTED)
+// ============================================
+
+// ADMIN: Delete room permanently
+app.delete("/api/rooms/:id", clerkAuth, isAdmin, async (req, res) => {
   try {
-    console.log("File received:", req.file);
-    console.log("Body received:", req.body);
-
-    const { roomName, description, department } = req.body;
-
-    if (!req.file) {
-      return res.status(400).json({ success: false, error: "No file uploaded" });
-    }
-    if (!roomName || !roomName.trim()) {
-      return res.status(400).json({ success: false, error: "Room name is required" });
-    }
-    if (!department || !department.trim()) {
-      return res.status(400).json({ success: false, error: "Department is required" });
-    }
-
-    const existingRoom = await Image.findOne({
-      roomName: roomName.trim(),
-      department: department.trim(),
-      isActive: true
-    });
-
-    if (existingRoom) {
-      return res.status(400).json({ success: false, error: "Room name already exists in this department" });
-    }
-
-    const newImage = new Image({
-      filename: req.file.originalname,
-      url: req.file.path,       // Cloudinary: secure_url OR path | Disk: path
-      public_id: req.file.public_id || null, // only if cloudinary
-      roomName: roomName.trim(),
-      description: description ? description.trim() : "",
-      department: department.trim()
-    });
-
-    await newImage.save();
-
-    res.status(201).json({
-      success: true,
-      message: "File uploaded successfully",
-      data: newImage
-    });
-  } catch (error) {
-    console.error("Upload error:", error);
-    if (req.file && req.file.public_id) {
-      try {
-        await cloudinary.uploader.destroy(req.file.public_id);
-      } catch (e) {}
-    }
-    res.status(500).json({ success: false, error: "Upload failed" });
-  }
-});
-
-// UPDATE ROOM - New feature
-app.put("/api/rooms/:id", async (req, res) => {
-  try {
-    const { roomName, description } = req.body;
-    const roomId = req.params.id;
+    console.log("🗑️ Admin deleting room:", req.params.id);
     
-    const room = await Image.findById(roomId);
-    if (!room) {
-      return res.status(404).json({ success: false, error: "Room not found" });
-    }
-    
-    // Check if new room name already exists (excluding current room)
-    if (roomName && roomName !== room.roomName) {
-      const existingRoom = await Image.findOne({ 
-        roomName: roomName.trim(), 
-        isActive: true,
-        _id: { $ne: roomId }
-      });
-      
-      if (existingRoom) {
-        return res.status(400).json({ 
-          success: false, 
-          error: "Room name already exists. Please choose a different name." 
-        });
-      }
-    }
-    
-    const updateData = {};
-    if (roomName) updateData.roomName = roomName.trim();
-    if (description !== undefined) updateData.description = description.trim();
-    
-    const updatedRoom = await Image.findByIdAndUpdate(
-      roomId, 
-      updateData, 
-      { new: true, runValidators: true }
-    );
-    
-    res.json({
-      success: true,
-      message: "Room updated successfully",
-      data: updatedRoom
-    });
-  } catch (error) {
-    console.error("Update error:", error);
-    res.status(500).json({ success: false, error: "Failed to update room" });
-  }
-});
-
-// DELETE SINGLE ROOM - Enhanced with better error handling
-app.delete("/api/rooms/:id", async (req, res) => {
-  try {
     const room = await Image.findById(req.params.id);
     
     if (!room) {
       return res.status(404).json({ success: false, error: "Room not found" });
     }
 
-    // Delete from Cloudinary first
+    // Delete from Cloudinary
     if (room.public_id) {
       try {
-        const cloudinaryResult = await cloudinary.uploader.destroy(room.public_id);
-        console.log("Cloudinary deletion result:", cloudinaryResult);
+        await cloudinary.uploader.destroy(room.public_id);
+        console.log("🗑️ Cloudinary image deleted");
       } catch (cloudinaryError) {
         console.error("Cloudinary deletion error:", cloudinaryError);
-        // Continue with database deletion even if Cloudinary fails
       }
     }
     
     // Delete from database
     await Image.findByIdAndDelete(req.params.id);
     
+    console.log("✅ Room deleted successfully");
     res.json({ 
       success: true, 
       message: "Room deleted successfully",
@@ -377,119 +478,77 @@ app.delete("/api/rooms/:id", async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Delete error:", error);
+    console.error("❌ Delete error:", error);
     res.status(500).json({ success: false, error: "Failed to delete room" });
   }
 });
 
-// BULK DELETE ROOMS - New feature
-app.delete("/api/rooms/bulk", async (req, res) => {
+// ADMIN: Deactivate room (soft delete)
+app.patch("/api/rooms/:id/deactivate", clerkAuth, isAdmin, async (req, res) => {
   try {
-    const { roomIds } = req.body;
+    console.log("🚫 Admin deactivating room:", req.params.id);
     
-    if (!roomIds || !Array.isArray(roomIds) || roomIds.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Room IDs array is required" 
-      });
-    }
-    
-    // Find rooms to delete
-    const roomsToDelete = await Image.find({ 
-      _id: { $in: roomIds } 
-    }).select('_id roomName public_id filename');
-    
-    if (roomsToDelete.length === 0) {
-      return res.status(404).json({ success: false, error: "No rooms found to delete" });
-    }
-    
-    // Delete from Cloudinary
-    const cloudinaryDeletions = roomsToDelete
-      .filter(room => room.public_id)
-      .map(room => cloudinary.uploader.destroy(room.public_id));
-    
-    try {
-      await Promise.all(cloudinaryDeletions);
-      console.log("Bulk Cloudinary deletion completed");
-    } catch (cloudinaryError) {
-      console.error("Some Cloudinary deletions failed:", cloudinaryError);
-      // Continue with database deletion
-    }
-    
-    // Delete from database
-    const deleteResult = await Image.deleteMany({ 
-      _id: { $in: roomIds } 
-    });
-    
-    res.json({
-      success: true,
-      message: `Successfully deleted ${deleteResult.deletedCount} room(s)`,
-      deletedCount: deleteResult.deletedCount,
-      deletedRooms: roomsToDelete.map(room => ({
-        id: room._id,
-        roomName: room.roomName,
-        filename: room.filename
-      }))
-    });
-  } catch (error) {
-    console.error("Bulk delete error:", error);
-    res.status(500).json({ success: false, error: "Failed to delete rooms" });
-  }
-});
-
-// SOFT DELETE ROOM - Mark as inactive instead of permanent deletion
-app.patch("/api/rooms/:id/deactivate", async (req, res) => {
-  try {
     const room = await Image.findById(req.params.id);
     
     if (!room) {
       return res.status(404).json({ success: false, error: "Room not found" });
     }
+
+    if (!room.isActive) {
+      return res.status(400).json({ success: false, error: "Room is already inactive" });
+    }
+
+    // Set isActive to false
+    room.isActive = false;
+    await room.save();
     
-    const updatedRoom = await Image.findByIdAndUpdate(
-      req.params.id,
-      { isActive: false },
-      { new: true }
-    );
-    
-    res.json({
-      success: true,
+    console.log("✅ Room deactivated:", room.roomName);
+    res.json({ 
+      success: true, 
       message: "Room deactivated successfully",
-      data: updatedRoom
+      data: room
     });
   } catch (error) {
-    console.error("Deactivate error:", error);
+    console.error("❌ Deactivate error:", error);
     res.status(500).json({ success: false, error: "Failed to deactivate room" });
   }
 });
 
-// RESTORE ROOM - Reactivate a soft-deleted room
-app.patch("/api/rooms/:id/restore", async (req, res) => {
+// ADMIN: Restore room (reactivate)
+app.patch("/api/rooms/:id/restore", clerkAuth, isAdmin, async (req, res) => {
   try {
+    console.log("♻️ Admin restoring room:", req.params.id);
+    
     const room = await Image.findById(req.params.id);
     
     if (!room) {
       return res.status(404).json({ success: false, error: "Room not found" });
     }
+
+    if (room.isActive) {
+      return res.status(400).json({ success: false, error: "Room is already active" });
+    }
+
+    // Set isActive to true
+    room.isActive = true;
+    await room.save();
     
-    const updatedRoom = await Image.findByIdAndUpdate(
-      req.params.id,
-      { isActive: true },
-      { new: true }
-    );
-    
-    res.json({
-      success: true,
+    console.log("✅ Room restored:", room.roomName);
+    res.json({ 
+      success: true, 
       message: "Room restored successfully",
-      data: updatedRoom
+      data: room
     });
   } catch (error) {
-    console.error("Restore error:", error);
+    console.error("❌ Restore error:", error);
     res.status(500).json({ success: false, error: "Failed to restore room" });
   }
 });
 
-// Error handling middleware
+// ============================================
+// ERROR HANDLING
+// ============================================
+
 app.use((error, req, res, next) => {
   console.error("Error:", error);
   
@@ -508,14 +567,21 @@ app.use((error, req, res, next) => {
   });
 });
 
-// 404 handler
 app.use('*', (req, res) => {
+  console.log("404 - Route not found:", req.method, req.originalUrl);
   res.status(404).json({
     success: false,
-    error: 'Endpoint not found'
+    error: 'Endpoint not found',
+    requestedUrl: req.originalUrl,
+    method: req.method
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📍 API Base: http://localhost:${PORT}/api`);
+  console.log(`✅ User Submissions: POST /api/submissions`);
+  console.log(`👑 Admin Upload: POST /api/admin/upload`);
+  console.log(`🚫 Admin Deactivate: PATCH /api/rooms/:id/deactivate`);
+  console.log(`♻️ Admin Restore: PATCH /api/rooms/:id/restore`);
 });

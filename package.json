@@ -9,6 +9,8 @@
     "dev": "nodemon index.js"
   },
   "dependencies": {
+    "@clerk/backend": "^2.19.3",
+    "@clerk/clerk-sdk-node": "^4.13.23",
     "bcryptjs": "^3.0.2",
     "cloudinary": "^1.40.0",
     "cors": "^2.8.5",
