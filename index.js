@@ -25,7 +25,7 @@ const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:3000'],
+    origin: ['http://localhost:5173', 'http://localhost:3000', 'https://vrtour360.netlify.app'],
     methods: ["GET", "POST"],
     credentials: true,
   }
@@ -42,7 +42,7 @@ connectDB();
 
 // CORS configuration - Allow your frontend
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://vrtour360.netlify.app'],
   credentials: true
 }));
 
