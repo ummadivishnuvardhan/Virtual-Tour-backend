@@ -2,6 +2,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
+import http from "http";
+import { Server as SocketIOServer } from "socket.io";
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
 import { v2 as cloudinary } from "cloudinary";
@@ -10,6 +12,7 @@ import cors from "cors";
 import connectDB from "./config/Database.js";
 import Image from "./models/image.js";
 import Submission from "./models/Submission.js";
+import Hotspot from "./models/Hotspot.js";
 import DepartmentRoutes from "./routes/department.js";
 import AuthRoutes from "./routes/auth.js";
 import clerkAuth from "./middlewares/clerkAuth.js";
@@ -17,6 +20,17 @@ import isAdmin from "./middlewares/isAdmin.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Socket.io real-time setup
+const server = http.createServer(app);
+const io = new SocketIOServer(server, {
+  cors: {
+    origin: ['http://localhost:5173', 'http://localhost:3000'],
+    methods: ["GET", "POST"],
+    credentials: true,
+  }
+});
+io.on("connection", socket => socket.on("disconnect", () => {}));
 
 // Verify environment variables on startup
 console.log("🔍 Checking environment variables...");
@@ -209,6 +223,8 @@ app.post("/api/submissions/:id/approve", clerkAuth, isAdmin, async (req, res) =>
     await sub.save();
 
     console.log("✅ Approved and room created:", room._id);
+    // Broadcast new room to all connected clients
+    io.emit("newRoom", room);
     res.json({ success: true, message: "Submission approved successfully", data: room });
   } catch (e) {
     console.error("❌ Approve error:", e);
@@ -306,6 +322,8 @@ app.post("/api/admin/upload", clerkAuth, isAdmin, adminUpload.single("panoramaIm
     await newImage.save();
 
     console.log("✅ Admin room created directly:", newImage._id);
+    // Broadcast new room to all connected clients
+    io.emit("newRoom", newImage);
     res.status(201).json({
       success: true,
       message: "Room uploaded successfully",
@@ -321,6 +339,60 @@ app.post("/api/admin/upload", clerkAuth, isAdmin, adminUpload.single("panoramaIm
       }
     }
     res.status(500).json({ success: false, error: "Upload failed" });
+  }
+});
+
+// ============================================
+// VR HOTSPOTS ROUTES
+// ============================================
+
+// PUBLIC: Get all hotspots for a specific room
+app.get("/api/rooms/:id/hotspots", async (req, res) => {
+  try {
+    const hotspots = await Hotspot.find({ roomId: req.params.id });
+    res.json({ success: true, data: hotspots });
+  } catch (error) {
+    console.error("Fetch hotspots error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch hotspots" });
+  }
+});
+
+// ADMIN: Add a new hotspot to a room
+app.post("/api/rooms/:id/hotspots", clerkAuth, isAdmin, async (req, res) => {
+  try {
+    const { pitch, yaw, title, description, imageUrl } = req.body;
+    
+    if (pitch === undefined || yaw === undefined || !title) {
+       return res.status(400).json({ success: false, error: "Pitch, yaw, and title are required" });
+    }
+
+    const newHotspot = await Hotspot.create({
+      roomId: req.params.id,
+      pitch,
+      yaw,
+      title,
+      description: description || "",
+      imageUrl: imageUrl || "",
+    });
+
+    res.status(201).json({ success: true, data: newHotspot });
+  } catch (error) {
+    console.error("Add hotspot error:", error);
+    res.status(500).json({ success: false, error: "Failed to add hotspot" });
+  }
+});
+
+// ADMIN: Delete a hotspot
+app.delete("/api/hotspots/:id", clerkAuth, isAdmin, async (req, res) => {
+  try {
+    const deleted = await Hotspot.findByIdAndDelete(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: "Hotspot not found" });
+    }
+    res.json({ success: true, message: "Hotspot deleted successfully" });
+  } catch (error) {
+    console.error("Delete hotspot error:", error);
+    res.status(500).json({ success: false, error: "Failed to delete hotspot" });
   }
 });
 
@@ -351,7 +423,7 @@ app.get("/api/rooms", async (req, res) => {
         .sort(sortObject)
         .skip(skip)
         .limit(limit)
-        .select("filename url roomName description department views createdAt isActive"),
+        .select("filename url roomName description department views reactions createdAt isActive"),
       Image.countDocuments(filterQuery)
     ]);
 
@@ -400,7 +472,7 @@ app.get("/api/rooms/search", async (req, res) => {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit))
-        .select('filename url roomName description views createdAt'),
+        .select('filename url roomName description views reactions createdAt'),
       Image.countDocuments(searchQuery)
     ]);
     
@@ -577,7 +649,7 @@ app.use('*', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📍 API Base: http://localhost:${PORT}/api`);
   console.log(`✅ User Submissions: POST /api/submissions`);

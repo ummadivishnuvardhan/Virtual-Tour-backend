@@ -1,0 +1,94 @@
+{
+  "success": true,
+  "data": [
+    {
+      "reactions": {
+        "like": 0,
+        "wow": 0,
+        "fire": 1
+      },
+      "_id": "69b51b27249a4bdd86e52bf6",
+      "filename": "ChatGPT Image Feb 23, 2026, 09_13_58 PM.png",
+      "url": "https://res.cloudinary.com/dl5nvw6pa/image/upload/v1773476612/cse-vr-panorama-submissions/submission-1773476603469-ChatGPT%20Image%20Feb%2023%2C%202026%2C%2009_13_58%20PM.png.jpg",
+      "roomName": "Library",
+      "description": "For studying",
+      "department": "CSE",
+      "isActive": true,
+      "views": 0,
+      "createdAt": "2026-03-14T08:24:07.833Z"
+    },
+    {
+      "reactions": {
+        "like": 0,
+        "wow": 0,
+        "fire": 0
+      },
+      "_id": "691d5187bc49a94654d05316",
+      "filename": "Ground Floor Room.jpg",
+      "url": "https://res.cloudinary.com/dl5nvw6pa/image/upload/v1763529058/cse-vr-panorama-submissions/submission-1763529050281-Ground%20Floor%20Room.jpg.jpg",
+      "roomName": "Outer room",
+      "description": "This is outer room",
+      "department": "CSE",
+      "isActive": true,
+      "views": 4,
+      "createdAt": "2025-11-19T05:11:35.055Z"
+    },
+    {
+      "reactions": {
+        "fire": 0,
+        "like": 0,
+        "wow": 0
+      },
+      "_id": "691341f4a8582b35e3260be3",
+      "filename": "Big Seminar Hall.jpg",
+      "url": "https://res.cloudinary.com/dl5nvw6pa/image/upload/v1762869209/cse-vr-panorama-submissions/submission-1762869201666-Big%20Seminar%20Hall.jpg.jpg",
+      "roomName": "Small Seminar Hall",
+      "description": "This room is used for taking classes for multiple sections combined and to conduct meetings.",
+      "department": "CSE",
+      "isActive": true,
+      "views": 0,
+      "createdAt": "2025-11-11T14:02:28.588Z"
+    },
+    {
+      "reactions": {
+        "fire": 0,
+        "like": 0,
+        "wow": 0
+      },
+      "_id": "69133ef7a8582b35e3260bb3",
+      "filename": "Ground Floor Room.jpg",
+      "url": "https://res.cloudinary.com/dl5nvw6pa/image/upload/v1762868926/cse-vr-panorama-submissions/submission-1762868913777-Ground%20Floor%20Room.jpg.jpg",
+      "roomName": "GH1",
+      "description": "This room is used for taking Lectures",
+      "department": "CSE",
+      "isActive": true,
+      "views": 0,
+      "createdAt": "2025-11-11T13:49:43.905Z"
+    },
+    {
+      "reactions": {
+        "fire": 0,
+        "like": 0,
+        "wow": 0
+      },
+      "_id": "69133d3aa8582b35e3260b7b",
+      "filename": "Big Seminar Hall.jpg",
+      "url": "https://res.cloudinary.com/dl5nvw6pa/image/upload/v1762868451/cse-vr-panorama-submissions/submission-1762868418620-Big%20Seminar%20Hall.jpg.jpg",
+      "roomName": "Big Seminar Hall",
+      "description": "This room is used for taking classes for multiple sections combined and to conduct meetings",
+      "department": "CSE",
+      "isActive": true,
+      "views": 2,
+      "createdAt": "2025-11-11T13:42:18.183Z"
+    }
+  ],
+  "pagination": {
+    "currentPage": 1,
+    "totalPages": 1,
+    "totalCount": 5,
+    "hasNext": false,
+    "hasPrev": false,
+    "limit": 10
+  },
+  "count": 5
+}

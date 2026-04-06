@@ -10,6 +10,11 @@ const imageSchema = new mongoose.Schema(
     department: { type: String, required: true },
     isActive: { type: Boolean, default: true },
     views: { type: Number, default: 0 },
+    reactions: {
+      fire: { type: Number, default: 0 },
+      like: { type: Number, default: 0 },
+      wow: { type: Number, default: 0 }
+    },
     createdAt: { type: Date, default: Date.now }
   },
   { timestamps: true }
